@@ -325,6 +325,37 @@ export const executions = {
       }
     }
   },
+  cancel: async (name: string) => {
+    const logger = getLogger(Logger.Execution);
+
+    logger.debug({ executionName: name }, 'execution.cancel');
+
+    const execution = executionsStore.get(name);
+
+    if (!execution) {
+      throw new NotFound('Unknown Execution')
+    }
+
+    if (execution.completionTime) {
+      return;
+    }
+
+    if (execution.runningCount || (execution.startTime && !execution.completionTime)) {
+      const container = runningContainersByExecutionName.get(name);
+
+      if (container) {
+        logger.debug({ executionName: name }, `killing running container for execution ${name}`);
+        await container.kill();
+        await container.remove();
+        runningContainersByExecutionName.delete(name);
+      }
+    }
+
+    execution.runningCount = 0;
+    execution.failedCount = Math.max(execution.failedCount ?? 0, 1);
+    execution.completionTime = nowTimestamp();
+    execution.updateTime = nowTimestamp();
+  },
   get: (name: string) => {
     const logger = getLogger(Logger.Execution);
 

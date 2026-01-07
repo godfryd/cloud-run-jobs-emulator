@@ -7,6 +7,17 @@ import { Logger, getLogger } from '@utils/logger'
 import Dockerode from 'dockerode'
 import { getConfig } from '@utils/config';
 
+const expandEnvVars = (input?: string | null) => {
+  const raw = input ?? '';
+
+  return raw.replace(/\$\{([A-Z0-9_]+)\}|\$([A-Z0-9_]+)/g, (_match, braced, bare) => {
+    const key = (braced ?? bare) as string | undefined;
+    if (!key) {
+      return '';
+    }
+    return process.env[key] ?? '';
+  });
+};
 
 const nowTimestamp = () => protos.google.protobuf.Timestamp.create({
   seconds: Math.floor(Date.now() / 1000)
@@ -154,7 +165,7 @@ export const executions = {
       Image: containerTemplate?.image ?? undefined,
       Entrypoint: containerTemplate?.command ?? undefined,
       Cmd: containerTemplate?.args ?? undefined,
-      Env: containerTemplate.env?.map(({ name, value }) => `${name}=${value}`) ?? [],
+      Env: containerTemplate.env?.map(({ name, value }) => `${name}=${expandEnvVars(value)}`) ?? [],
       ...(containerTemplate?.ports ? { 
         ExposedPorts: Object.fromEntries(
           containerTemplate?.ports

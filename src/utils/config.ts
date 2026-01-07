@@ -21,6 +21,7 @@ export class Config {
   } = {}
 
   applicationDefaultCredentials?: string;
+  dockerNetwork: string | undefined = process.env?.DOCKER_NETWORK;
 
   constructor () {
     const logger = getLogger()

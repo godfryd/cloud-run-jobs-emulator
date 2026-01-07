@@ -186,6 +186,12 @@ export const executions = {
     };
 
     const config = getConfig();
+    if (config.dockerNetwork) {
+      options.HostConfig = {
+        ...(options.HostConfig ?? {}),
+        NetworkMode: config.dockerNetwork,
+      };
+    }
 
     // If the job is configured to use GCP application default credentials, bind the host's GCP credentials directory to the container
     // so that the container can authenticate with GCP services. Should be used in conjunction with GOOGLE_APPLICATION_CREDENTIALS env var

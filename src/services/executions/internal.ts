@@ -248,7 +248,7 @@ export const executions = {
           const timeout = overriddenJob.template?.template?.timeout;
 
           if (!timeout) {
-            return 600_000;
+            return 1_800_000;
           }
 
           return Number.parseInt((timeout.seconds ?? 0).toString()) * 1000 + Number.parseInt((timeout.nanos ?? 0).toString()) / 1_000_000;

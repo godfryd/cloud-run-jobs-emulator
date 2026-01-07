@@ -16,6 +16,8 @@ To use this emulator with `docker compose` you'll need to add it as a service. T
 services:
   cloud-run-jobs-emulator:
     image: mattkindynimbus/cloud-run-jobs-emulator:latest
+    environment:
+      DOCKER_NETWORK: akka-local # ensure jobs run inside your compose network
     configs:
       - source: cloud-run-jobs-config
         target: /cloud-run-jobs-config.yaml

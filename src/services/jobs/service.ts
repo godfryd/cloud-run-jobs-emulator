@@ -92,23 +92,27 @@ export const JobsService = {
   RunJob: handler<protos.google.cloud.run.v2.IRunJobRequest, protos.google.longrunning.Operation>(async (call) => {
     const logger = getLogger(Logger.Job);
 
-    logger.debug({ call }, 'RunJob');
+    const { name: jobName, overrides } = call.request;
+    logger.info({ jobName, overrides }, 'RunJob invoked');
 
-    const {
-      name: jobName,
-      overrides
-    }: protos.google.cloud.run.v2.IRunJobRequest = call.request;
+    try {
+      if (!jobName) {
+        throw new BadRequest('Invalid Job: name is required');
+      }
 
-    if (!jobName) {
-      throw new BadRequest('Invalid Job: name is required');
+      const { execution } = await jobs.run(jobName, overrides ?? undefined);
+
+      // should contain an Execution?
+      return new protos.google.longrunning.Operation({
+        name: execution.name,
+        response: null
+      });
+    } catch (err) {
+      logger.error(
+        { err, jobName, overrides },
+        'RunJob failed',
+      );
+      throw err;
     }
-
-    const { execution } = await jobs.run(jobName, overrides ?? undefined);
-
-    // should contain an Execution?
-    return new protos.google.longrunning.Operation({
-      name: execution.name,
-      response: null
-    });
   })
 }

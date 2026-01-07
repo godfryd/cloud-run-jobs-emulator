@@ -55,7 +55,8 @@ export const executions = {
     }
 
     const applyContainerOverrides = (containerOverrides: protos.google.cloud.run.v2.RunJobRequest.Overrides.IContainerOverride[]): protos.google.cloud.run.v2.IJob => {
-      const overriddenJob = protos.google.cloud.run.v2.Job.create(job);
+      const clonedJob = JSON.parse(JSON.stringify(job)) as protos.google.cloud.run.v2.IJob;
+      const overriddenJob = protos.google.cloud.run.v2.Job.create(clonedJob);
 
       if (!containerOverrides.length) {
         return overriddenJob;

@@ -19,12 +19,17 @@ export const getLogger = (name: Logger = Logger.Default, base: { [key: string]: 
     return loggers.get(name)!
   }
 
+  const transportOptions = name === Logger.Execution
+    ? { target: 'pino-pretty', options: { ignore: 'time' } }
+    : { target: 'pino-pretty' }
+
   const logger = pino({
     name,
     base,
     level: levels.get(name) ?? 'info',
     transport: {
-      target: 'pino-pretty'
+      target: transportOptions.target,
+      options: transportOptions.options
     }
   })
 

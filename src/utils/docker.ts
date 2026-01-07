@@ -12,9 +12,17 @@ export const streamContainerLogs = async (
   executionName: string
 ): Promise<void> => {
   const stream = new PassThrough()
+  const executionId = executionName.split('/').pop() ?? executionName
 
   stream.on('data', (chunk) => {
-    logger.info(`[${executionName}] ${chunk.toString('utf8').trim()}`)
+    const raw = chunk.toString('utf8').trim()
+    const trimmed = raw.replace(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+/,
+      ''
+    )
+    if (trimmed) {
+      logger.info(`[${executionId}] ${trimmed}`)
+    }
   })
 
   const logs = await container.logs({

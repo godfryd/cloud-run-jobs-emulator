@@ -263,8 +263,8 @@ export const executions = {
           }, timeoutMs);
         });
 
-        container.start();
-        streamContainerLogs(container, logger, execution.name);
+        await container.start();
+        await streamContainerLogs(container, logger, execution.name);
 
         await Promise.race([
           waitForCompletion()

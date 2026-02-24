@@ -7,17 +7,6 @@ import { Logger, getLogger } from '@utils/logger'
 import Dockerode from 'dockerode'
 import { getConfig } from '@utils/config';
 
-const expandEnvVars = (input?: string | null) => {
-  const raw = input ?? '';
-
-  return raw.replace(/\$\{([A-Z0-9_]+)\}|\$([A-Z0-9_]+)/g, (_match, braced, bare) => {
-    const key = (braced ?? bare) as string | undefined;
-    if (!key) {
-      return '';
-    }
-    return process.env[key] ?? '';
-  });
-};
 
 const nowTimestamp = () => protos.google.protobuf.Timestamp.create({
   seconds: Math.floor(Date.now() / 1000)
@@ -166,7 +155,7 @@ export const executions = {
       Image: containerTemplate?.image ?? undefined,
       Entrypoint: containerTemplate?.command ?? undefined,
       Cmd: containerTemplate?.args ?? undefined,
-      Env: containerTemplate.env?.map(({ name, value }) => `${name}=${expandEnvVars(value)}`) ?? [],
+      Env: containerTemplate.env?.map(({ name, value }) => `${name}=${value}`) ?? [],
       ...(containerTemplate?.ports ? { 
         ExposedPorts: Object.fromEntries(
           containerTemplate?.ports
@@ -249,7 +238,7 @@ export const executions = {
           const timeout = overriddenJob.template?.template?.timeout;
 
           if (!timeout) {
-            return 1_800_000;
+            return 600_000;
           }
 
           return Number.parseInt((timeout.seconds ?? 0).toString()) * 1000 + Number.parseInt((timeout.nanos ?? 0).toString()) / 1_000_000;
@@ -325,37 +314,6 @@ export const executions = {
         runningContainersByExecutionName.delete(name);
       }
     }
-  },
-  cancel: async (name: string) => {
-    const logger = getLogger(Logger.Execution);
-
-    logger.debug({ executionName: name }, 'execution.cancel');
-
-    const execution = executionsStore.get(name);
-
-    if (!execution) {
-      throw new NotFound('Unknown Execution')
-    }
-
-    if (execution.completionTime) {
-      return;
-    }
-
-    if (execution.runningCount || (execution.startTime && !execution.completionTime)) {
-      const container = runningContainersByExecutionName.get(name);
-
-      if (container) {
-        logger.debug({ executionName: name }, `killing running container for execution ${name}`);
-        await container.kill();
-        await container.remove();
-        runningContainersByExecutionName.delete(name);
-      }
-    }
-
-    execution.runningCount = 0;
-    execution.failedCount = Math.max(execution.failedCount ?? 0, 1);
-    execution.completionTime = nowTimestamp();
-    execution.updateTime = nowTimestamp();
   },
   get: (name: string) => {
     const logger = getLogger(Logger.Execution);

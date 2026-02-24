@@ -35,31 +35,6 @@ export const ExecutionsService = {
       executions: executions.list(jobName),
     };
   }),
-  CancelExecution: handler<protos.google.cloud.run.v2.ICancelExecutionRequest, protos.google.longrunning.Operation>(async (call) => {
-    const logger = getLogger(Logger.Job);
-
-    logger.debug({ call }, 'CancelExecution');
-
-    const executionName = call.request.name;
-
-    if (!executionName) {
-      throw new BadRequest('Invalid Execution: name is required');
-    }
-
-    const execution = executions.get(executionName);
-
-    if (!execution) {
-      throw new NotFound('Unknown Execution')
-    }
-
-    await executions.cancel(executionName);
-
-    return protos.google.longrunning.Operation.create({
-      name: executionName,
-      done: true,
-      response: protos.google.cloud.run.v2.Execution.toObject(execution)
-    });
-  }),
   DeleteExecution: handler<protos.google.cloud.run.v2.IDeleteExecutionRequest, protos.google.longrunning.Operation>(async (call) => {
     const logger = getLogger(Logger.Job);
 

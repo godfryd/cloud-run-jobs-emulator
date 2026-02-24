@@ -37,6 +37,7 @@ jobs:
     image: my-docker-image:tag
   another-great-job:
     image: my-docker-image:tag
+    timeoutSeconds: 900
     command:
       - node
       - my-script.js
@@ -85,5 +86,5 @@ Otherwise, you can use the [Cloud Run Jobs Client Library](https://cloud.google.
 - State -- such as registered jobs, executions -- are stored in-memory. This means that if the service is restarted, the state will be wiped fresh. In the longer term, we'd like to support a persistent volume or at least handle this on-disk in the container, so that it will survive container restarts.
 - Not all Cloud Run Job APIs are implemented, such as `Task`-related APIs. These will be added on an as-needed/as-requested basis. Please feel free to drop a PR!
 - `LongRunning` operations are not yet supported, so awaiting `.promise()` on a `createJob` calls (along with other methods that return a `LongRunningOperation`) will error.
-- The configuration only supports image, environment variables, and command specification. This will continue to expand as needed.
+- The configuration supports image, environment variables, command, and timeoutSeconds specification.
 - `RunJob` is only using the image, environment variables, and entrypoint/command during execution at the moment.

@@ -12,12 +12,17 @@ const nowTimestamp = () => protos.google.protobuf.Timestamp.create({
 const jobsStore = new Map<string, protos.google.cloud.run.v2.Job>();
 
 const configToJob = ([jobName, jobConfig]: [string, ReturnType<typeof getConfig>['jobs'][string]]): protos.google.cloud.run.v2.Job => {
+  const timeout = typeof jobConfig.timeoutSeconds === 'number'
+    ? protos.google.protobuf.Duration.create({ seconds: jobConfig.timeoutSeconds })
+    : undefined
+
   return protos.google.cloud.run.v2.Job.create({
     name: jobName,
     createTime: nowTimestamp(),
     template: protos.google.cloud.run.v2.ExecutionTemplate.create({
       template: protos.google.cloud.run.v2.TaskTemplate.create({
-        containers: [protos.google.cloud.run.v2.Container.create(jobConfig)]
+        containers: [protos.google.cloud.run.v2.Container.create(jobConfig)],
+        timeout,
       })
     })
   })

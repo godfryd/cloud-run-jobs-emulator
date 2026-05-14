@@ -38,6 +38,7 @@ jobs:
   another-great-job:
     image: my-docker-image:tag
     timeoutSeconds: 900
+    maxRetries: 3
     command:
       - node
       - my-script.js
@@ -86,5 +87,14 @@ Otherwise, you can use the [Cloud Run Jobs Client Library](https://cloud.google.
 - State -- such as registered jobs, executions -- are stored in-memory. This means that if the service is restarted, the state will be wiped fresh. In the longer term, we'd like to support a persistent volume or at least handle this on-disk in the container, so that it will survive container restarts.
 - Not all Cloud Run Job APIs are implemented, such as `Task`-related APIs. These will be added on an as-needed/as-requested basis. Please feel free to drop a PR!
 - `LongRunning` operations are not yet supported, so awaiting `.promise()` on a `createJob` calls (along with other methods that return a `LongRunningOperation`) will error.
-- The configuration supports image, environment variables, command, and timeoutSeconds specification.
-- `RunJob` is only using the image, environment variables, and entrypoint/command during execution at the moment.
+- The configuration supports image, environment variables, command, timeoutSeconds, and maxRetries specification.
+- `RunJob` is only using the image, environment variables, entrypoint/command, timeout, and retry count during execution at the moment.
+
+## Runtime environment
+
+Each task attempt receives Cloud Run-style runtime variables. These values override any matching variables from the job config:
+
+- `CLOUD_RUN_JOB` - final segment of the job name
+- `CLOUD_RUN_EXECUTION` - final segment of the execution name
+- `CLOUD_RUN_TASK_INDEX` - always `0`, because this emulator only runs one task
+- `CLOUD_RUN_TASK_ATTEMPT` - zero-based attempt number, from `0` through `maxRetries`

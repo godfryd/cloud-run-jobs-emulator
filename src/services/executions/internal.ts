@@ -16,6 +16,15 @@ const executionNamesByJobName = new Map<string, string[]>();
 const executionsStore = new Map<string, protos.google.cloud.run.v2.Execution>();
 const runningContainersByExecutionName = new Map<string, Dockerode.Container>();
 
+const lastPathSegment = (name: string | null | undefined) => name?.split('/').pop() ?? name ?? '';
+
+const runtimeEnv = (jobName: string, executionName: string, attempt: number) => [
+  { name: 'CLOUD_RUN_JOB', value: lastPathSegment(jobName) },
+  { name: 'CLOUD_RUN_EXECUTION', value: lastPathSegment(executionName) },
+  { name: 'CLOUD_RUN_TASK_INDEX', value: '0' },
+  { name: 'CLOUD_RUN_TASK_ATTEMPT', value: attempt.toString() },
+];
+
 export const executions = {
   list: (jobName: string | '-' = '-') => {
     const logger = getLogger(Logger.Execution);
@@ -151,36 +160,11 @@ export const executions = {
     // todo: add support for multiple containers
     const [containerTemplate] = overriddenJob.template?.template?.containers ?? [];
 
-    const options: Dockerode.ContainerCreateOptions = {
-      Image: containerTemplate?.image ?? undefined,
-      Entrypoint: containerTemplate?.command ?? undefined,
-      Cmd: containerTemplate?.args ?? undefined,
-      Env: containerTemplate.env?.map(({ name, value }) => `${name}=${value}`) ?? [],
-      ...(containerTemplate?.ports ? { 
-        ExposedPorts: Object.fromEntries(
-          containerTemplate?.ports
-            ?.filter((port): port is typeof port & { containerPort: number } => !!port.containerPort)
-            .map(({ containerPort }) => [`${containerPort}/tcp`, {}])
-        ),
-        HostConfig: {
-          PortBindings: Object.fromEntries(
-            containerTemplate?.ports
-              ?.filter((port): port is typeof port & { containerPort: number } => !!port.containerPort)
-              .map(({ containerPort }) => [
-                `${containerPort}/tcp`, 
-                [{ HostPort: containerPort.toString() }]
-              ])
-          )
-        }
-      } : {}),
-    };
-
     const config = getConfig();
+    const baseHostConfig: Dockerode.HostConfig = {};
+
     if (config.dockerNetwork) {
-      options.HostConfig = {
-        ...(options.HostConfig ?? {}),
-        NetworkMode: config.dockerNetwork,
-      };
+      baseHostConfig.NetworkMode = config.dockerNetwork;
     }
 
     // If the job is configured to use GCP application default credentials, bind the host's GCP credentials directory to the container
@@ -198,10 +182,7 @@ export const executions = {
         gcpDirectory = pathParts.map(part => part === '$HOST_HOME' ? process.env.HOST_HOME : part).join(path.sep);
       }
 
-      options.HostConfig = {
-        ...(options.HostConfig ?? {}),
-        Binds: [`${gcpDirectory}:/gcp/config:ro`],
-      }
+      baseHostConfig.Binds = [`${gcpDirectory}:/gcp/config:ro`];
     }
 
     const execution = protos.google.cloud.run.v2.Execution.create({
@@ -213,13 +194,56 @@ export const executions = {
 
     executionsStore.set(execution.name, execution);
     executionNamesByJobName.set(job.name, [...(executionNamesByJobName.get(job.name) ?? []), execution.name]);
-    
-    logger.debug({ options }, `creating container for execution ${execution.name}`);
-    const container = await docker.createContainer(options);
-    runningContainersByExecutionName.set(execution.name, container);
+
+    const createOptions = (attempt: number): Dockerode.ContainerCreateOptions => {
+      const envByName = [
+        ...(containerTemplate.env ?? []),
+        ...runtimeEnv(job.name, execution.name, attempt),
+      ].reduce(
+        (acc, { name, value }) => {
+          if (name && value !== null && value !== undefined) {
+            acc[name] = value;
+          }
+          return acc;
+        },
+        {} as Record<string, string>
+      );
+      const options: Dockerode.ContainerCreateOptions = {
+        Image: containerTemplate?.image ?? undefined,
+        Entrypoint: containerTemplate?.command ?? undefined,
+        Cmd: containerTemplate?.args ?? undefined,
+        Env: Object.entries(envByName).map(([name, value]) => `${name}=${value}`),
+        ...(containerTemplate?.ports ? { 
+          ExposedPorts: Object.fromEntries(
+            containerTemplate?.ports
+              ?.filter((port): port is typeof port & { containerPort: number } => !!port.containerPort)
+              .map(({ containerPort }) => [`${containerPort}/tcp`, {}])
+          ),
+          HostConfig: {
+            ...baseHostConfig,
+            PortBindings: Object.fromEntries(
+              containerTemplate?.ports
+                ?.filter((port): port is typeof port & { containerPort: number } => !!port.containerPort)
+                .map(({ containerPort }) => [
+                  `${containerPort}/tcp`, 
+                  [{ HostPort: containerPort.toString() }]
+                ])
+            )
+          }
+        } : {}),
+      };
+
+      if (Object.keys(baseHostConfig).length && !options.HostConfig) {
+        options.HostConfig = { ...baseHostConfig };
+      }
+
+      return options;
+    };
 
     const startExecution = async () => {
-      const waitForCompletion = async () => {
+      const maxRetries = Number.parseInt((overriddenJob.template?.template?.maxRetries ?? 0).toString(), 10);
+      const maxAttempt = Number.isFinite(maxRetries) && maxRetries > 0 ? maxRetries : 0;
+      const waitForCompletion = async (container: Dockerode.Container) => {
         const { StatusCode } = await container.wait();
     
         if (StatusCode !== 0) {
@@ -227,46 +251,88 @@ export const executions = {
         }
       };
 
-      try {
-        let timeoutTimer: NodeJS.Timeout;
+      const runAttempt = async (attempt: number) => {
+        if (execution.deleteTime) {
+          throw new Error(`execution ${execution.name} was deleted before attempt ${attempt}`);
+        }
+        const options = createOptions(attempt);
+        logger.debug({ options, attempt }, `creating container for execution ${execution.name}`);
+        const container = await docker.createContainer(options);
+        if (execution.deleteTime) {
+          await container.remove();
+          throw new Error(`execution ${execution.name} was deleted before container start`);
+        }
+        runningContainersByExecutionName.set(execution.name, container);
+        let timeoutTimer: NodeJS.Timeout | undefined;
 
+        try {
+          const timeoutMs = (() => {
+            const timeout = overriddenJob.template?.template?.timeout;
+
+            if (!timeout) {
+              return 600_000;
+            }
+
+            return Number.parseInt((timeout.seconds ?? 0).toString()) * 1000 + Number.parseInt((timeout.nanos ?? 0).toString()) / 1_000_000;
+          })();
+
+          const expiration = new Promise((_, reject) => {
+            timeoutTimer = setTimeout(() => {
+              execution.expireTime = nowTimestamp();
+              execution.updateTime = nowTimestamp();
+
+              reject(new RequestTimeout(`job ${execution.name} timed out after ${timeoutMs.toFixed(6)}ms`));
+            }, timeoutMs);
+          });
+
+          await container.start();
+          await streamContainerLogs(container, logger, execution.name);
+
+          await Promise.race([
+            waitForCompletion(container),
+            expiration
+          ]);
+        } finally {
+          if (timeoutTimer) {
+            clearTimeout(timeoutTimer);
+          }
+
+          const runningContainer = runningContainersByExecutionName.get(execution.name);
+          if (runningContainer) {
+            if ((await runningContainer.inspect()).State.Running) {
+              await runningContainer.kill();
+            }
+            await runningContainer.remove();
+            runningContainersByExecutionName.delete(execution.name);
+          }
+        }
+      };
+
+      try {
         execution.startTime = nowTimestamp();
         execution.updateTime = nowTimestamp();
         execution.runningCount = 1;
 
-        const timeoutMs = (() => {
-          const timeout = overriddenJob.template?.template?.timeout;
-
-          if (!timeout) {
-            return 600_000;
-          }
-
-          return Number.parseInt((timeout.seconds ?? 0).toString()) * 1000 + Number.parseInt((timeout.nanos ?? 0).toString()) / 1_000_000;
-        })();
-
-        const expiration = new Promise((_, reject) => {
-          timeoutTimer = setTimeout(() => {
-            execution.expireTime = nowTimestamp();
+        for (let attempt = 0; attempt <= maxAttempt; attempt += 1) {
+          try {
+            await runAttempt(attempt);
+            execution.succeededCount = 1;
             execution.updateTime = nowTimestamp();
+            logger.debug({ attempt }, `execution ${execution.name} for job ${job.name} completed successfully`);
+            return;
+          } catch (err) {
+            execution.updateTime = nowTimestamp();
+            if (execution.deleteTime) {
+              logger.debug({ attempt }, `execution ${execution.name} for job ${job.name} was deleted, skipping retry`);
+              return;
+            }
+            if (attempt >= maxAttempt) {
+              throw err;
+            }
+            logger.warn({ err, attempt, maxRetries: maxAttempt }, `retrying execution ${execution.name} for job ${job.name}`);
+          }
+        }
 
-            reject(new RequestTimeout(`job ${execution.name} timed out after ${timeoutMs.toFixed(6)}ms`));
-          }, timeoutMs);
-        });
-
-        await container.start();
-        await streamContainerLogs(container, logger, execution.name);
-
-        await Promise.race([
-          waitForCompletion()
-            .then(() => {
-              execution.succeededCount = 1;
-              execution.updateTime = nowTimestamp();
-            })
-            .finally(() => clearTimeout(timeoutTimer)),
-          expiration
-        ]);
-
-        logger.debug(`execution ${execution.name} for job ${job.name} completed successfully`);
 
       } catch (err) {
         execution.failedCount = 1;
@@ -277,13 +343,6 @@ export const executions = {
         execution.completionTime = nowTimestamp();
         execution.updateTime = nowTimestamp();
       
-        const runningContainer = runningContainersByExecutionName.get(execution.name);
-
-        if (runningContainer && (await runningContainer.inspect()).State.Running) {
-          await runningContainer.kill();
-          await runningContainer.remove();
-          runningContainersByExecutionName.delete(execution.name);
-        }
       }
     };
 

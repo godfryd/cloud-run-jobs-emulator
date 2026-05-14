@@ -15,6 +15,9 @@ const configToJob = ([jobName, jobConfig]: [string, ReturnType<typeof getConfig>
   const timeout = typeof jobConfig.timeoutSeconds === 'number'
     ? protos.google.protobuf.Duration.create({ seconds: jobConfig.timeoutSeconds })
     : undefined
+  const maxRetries = typeof jobConfig.maxRetries === 'number'
+    ? jobConfig.maxRetries
+    : undefined
 
   return protos.google.cloud.run.v2.Job.create({
     name: jobName,
@@ -23,6 +26,7 @@ const configToJob = ([jobName, jobConfig]: [string, ReturnType<typeof getConfig>
       template: protos.google.cloud.run.v2.TaskTemplate.create({
         containers: [protos.google.cloud.run.v2.Container.create(jobConfig)],
         timeout,
+        maxRetries,
       })
     })
   })

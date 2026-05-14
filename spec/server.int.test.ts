@@ -11,12 +11,14 @@ describe('JobsService', () => {
 
   beforeEach(async () => {
     config = getConfig()
+    config.host = 'localhost'
+    config.port = 0
     server = initializeServer()
     await startServer(server)
 
     client = new v2.JobsClient({
-      servicePath: '0.0.0.0',
-      port: 8123,
+      servicePath: config.host,
+      port: config.port,
       sslCreds: (new v2.JobsClient() as any)._gaxGrpc.grpc.credentials.createInsecure()
     })
   })

@@ -31,6 +31,8 @@ export const startServer = async (server: Server): Promise<Server> => {
         return reject(err)
       }
 
+      // Store dynamic ports for tests that bind with PORT=0.
+      config.port = port
       return resolve(port)
     })
   })

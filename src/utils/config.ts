@@ -18,6 +18,7 @@ export class Config {
         value: string;
       }[];
       timeoutSeconds?: number | string;
+      maxRetries?: number | string;
     }
   } = {}
 
@@ -56,6 +57,26 @@ export class Config {
     return timeoutSeconds
   }
 
+  private resolveMaxRetries (rawValue: number | string | undefined): number | undefined {
+    if (rawValue === undefined) {
+      return undefined
+    }
+
+    const resolvedValue = typeof rawValue === 'string' ? this.resolveEnvValue(rawValue).trim() : rawValue
+
+    if (resolvedValue === '') {
+      return undefined
+    }
+
+    const maxRetries = Number.parseInt(resolvedValue.toString(), 10)
+
+    if (!Number.isFinite(maxRetries) || maxRetries < 0) {
+      return undefined
+    }
+
+    return maxRetries
+  }
+
   private resolveJobConfigValues (): void {
     const logger = getLogger()
 
@@ -67,8 +88,14 @@ export class Config {
         if (job.timeoutSeconds !== undefined && timeoutSeconds === undefined) {
           logger.warn({ jobName, timeoutSeconds: job.timeoutSeconds }, 'invalid job timeoutSeconds value')
         }
+        const maxRetries = this.resolveMaxRetries(job.maxRetries)
+
+        if (job.maxRetries !== undefined && maxRetries === undefined) {
+          logger.warn({ jobName, maxRetries: job.maxRetries }, 'invalid job maxRetries value')
+        }
 
         job.timeoutSeconds = timeoutSeconds
+        job.maxRetries = maxRetries
         return
       }
 
@@ -82,7 +109,12 @@ export class Config {
       if (job.timeoutSeconds !== undefined && timeoutSeconds === undefined) {
         logger.warn({ jobName, timeoutSeconds: job.timeoutSeconds }, 'invalid job timeoutSeconds value')
       }
+      const maxRetries = this.resolveMaxRetries(job.maxRetries)
+      if (job.maxRetries !== undefined && maxRetries === undefined) {
+        logger.warn({ jobName, maxRetries: job.maxRetries }, 'invalid job maxRetries value')
+      }
       job.timeoutSeconds = timeoutSeconds
+      job.maxRetries = maxRetries
     })
   }
 

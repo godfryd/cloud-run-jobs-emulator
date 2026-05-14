@@ -8,7 +8,7 @@ WORKDIR ${ROOT_PATH}
 
 FROM base AS dependencies
 COPY --chown=node:node ./package*.json ${ROOT_PATH}/
-RUN npm install
+RUN npm ci
 
 # ---
 

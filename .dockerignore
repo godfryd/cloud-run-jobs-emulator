@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+spec
+example
+README.md
+Justfile
+jest.config.js
+jsconfig.json
